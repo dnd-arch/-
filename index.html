@@ -48,7 +48,7 @@
   .lib-title{font-family:'Caveat',cursive; font-size:30px; color:var(--accent); letter-spacing:0.3px;}
   .lib-sub{font-size:12.5px; color:var(--muted); margin-top:-2px;}
   .lib-empty{
-    position:fixed; inset:0; display:flex; align-items:center; justify-content:center;
+    display:none;
   }
   .create-btn{
     display:flex; align-items:center; gap:10px; padding:16px 28px;
@@ -286,7 +286,6 @@
       </div>
       <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;justify-content:flex-end;">
         <button class="create-btn" id="renameBtn">تغيير الاسم</button>
-        <button class="create-btn" id="prankBtn">Premium</button>
         <button class="create-btn" id="createBtnTop"><span class="plus">＋</span> ورقة جديدة</button>
       </div>
     </div>
@@ -574,13 +573,13 @@ function loadLibrary(){
     if(ids.length===0){
       const localIds=Object.keys(Local.getPapersIndex());
       if(localIds.length){ $('libEmpty').style.display='none'; $('library').classList.add('active'); renderLibraryCards(localIds); return; }
-      $('libGrid').innerHTML=''; $('library').classList.remove('active'); $('libEmpty').style.display='flex'; return;
+      $('libGrid').innerHTML=''; $('library').classList.add('active'); $('libEmpty').style.display='none'; return;
     }
     $('libEmpty').style.display='none'; $('library').classList.add('active');
     renderLibraryCards(ids, all);
   }, ()=>{
     const idx = Local.getPapersIndex(); const ids = Object.keys(idx);
-    if(ids.length===0) $('libEmpty').style.display='flex'; else renderLibraryCards(ids);
+    if(ids.length===0){ $('library').classList.add('active'); $('libEmpty').style.display='none'; $('libGrid').innerHTML=''; } else renderLibraryCards(ids);
   });
 }
 
@@ -627,7 +626,6 @@ function escapeHtml(s){
 $('createBtnTop').addEventListener('click', createNewPaper);
 $('createBtnEmpty').addEventListener('click', createNewPaper);
 $('renameBtn').addEventListener('click', openNameEditor);
-$('prankBtn').addEventListener('click', openPrankInfo);
 $('pageNameOk').addEventListener('click', confirmCreatePaper);
 $('pageNameCancel').addEventListener('click', closePageNameModal);
 $('pageNameInput').addEventListener('keydown', e=>{if(e.key==='Enter')confirmCreatePaper();if(e.key==='Escape')closePageNameModal();});
@@ -704,8 +702,8 @@ function maybeShowPrank(id, force){
   });
   $('prankFree').addEventListener('click', ()=>{
     Local.setSeenPrank();
-    ov.remove();
-    startCanvas(id);
+    ov.querySelector('.modal').innerHTML = `<div class="prank-msg">نتمسخر برك حبي<br>عندك الوقت كااااااملللل mwaaahh</div>`;
+    setTimeout(()=>{ ov.remove(); startCanvas(id); }, 1500);
   });
 }
 
@@ -716,8 +714,7 @@ function openPaper(id, showPrankIfFirst){
   currentPaperId = id;
   $('library').classList.remove('active');
   $('libEmpty').style.display='none';
-  const firstEver = !Local.hasSeenPrank() && Object.keys(Local.getPapersIndex()).length<=1;
-  maybeShowPrank(id, showPrankIfFirst===undefined ? firstEver : showPrankIfFirst);
+  maybeShowPrank(id, showPrankIfFirst === true);
 }
 
 function startCanvas(id){
