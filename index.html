@@ -286,6 +286,7 @@
       </div>
       <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;justify-content:flex-end;">
         <button class="create-btn" id="renameBtn">تغيير الاسم</button>
+        <button class="create-btn" id="logoutBtn">تسجيل خروج</button>
         <button class="create-btn" id="createBtnTop"><span class="plus">＋</span> ورقة جديدة</button>
       </div>
     </div>
@@ -433,7 +434,9 @@ const Local = {
   getName(){ return localStorage.getItem(LS_PREFIX+'name') || ''; },
   setName(n){ localStorage.setItem(LS_PREFIX+'name', n); },
   hasSeenPrank(){ return localStorage.getItem(LS_PREFIX+'prankSeen') === '1'; },
-  setSeenPrank(){ localStorage.setItem(LS_PREFIX+'prankSeen','1'); }
+  setSeenPrank(){ localStorage.setItem(LS_PREFIX+'prankSeen','1'); },
+  isLoggedOut(){ return localStorage.getItem(LS_PREFIX+'loggedOut') === '1'; },
+  setLoggedOut(v){ v ? localStorage.setItem(LS_PREFIX+'loggedOut','1') : localStorage.removeItem(LS_PREFIX+'loggedOut'); }
 };
 
 /* ---------------- State ---------------- */
@@ -450,6 +453,7 @@ let isOnline = navigator.onLine;
 
 const tool = {
   brush: 'pencil',
+  previousBrush: 'pencil',
   color: '#2b2622',
   size: 6,
   opacity: 100,
@@ -475,6 +479,9 @@ function boot(){
         $('nameInput').value=savedName || '';
         $('namePrompt').style.display='flex';
       }
+    } else if(Local.isLoggedOut()){
+      $('loading').style.display='none';
+      $('namePrompt').style.display='flex';
     } else {
       auth.signInAnonymously().catch(err=>{
         console.error(err);
@@ -486,6 +493,7 @@ function boot(){
 
 $('nameSubmit').addEventListener('click', submitName);
 $('registerSubmit').addEventListener('click', ()=>authenticateEmail('register'));
+$('logoutBtn').addEventListener('click', logoutAccount);
 $('passwordToggle').addEventListener('click', ()=>{
   const input=$('passwordInput'), button=$('passwordToggle');
   const visible=input.type==='text'; input.type=visible?'password':'text';
@@ -496,6 +504,17 @@ function submitName(){
   const v = $('nameInput').value.trim();
   if(!v) return;
   authenticateEmail('login');
+}
+function logoutAccount(){
+  Local.setLoggedOut(true);
+  closeCanvasView();
+  $('library').classList.remove('active');
+  $('libEmpty').style.display='none';
+  auth.signOut().then(()=>{
+    $('loading').style.display='none';
+    $('namePrompt').style.display='flex';
+    authMessage('تم تسجيل الخروج — سجّل الدخول للمتابعة');
+  });
 }
 function authMessage(text){
   const n=document.querySelector('.auth-note'); if(n)n.textContent=text;
@@ -520,6 +539,7 @@ function authenticateEmail(mode){
       localStorage.removeItem(LS_PREFIX+'papers');
     }
     currentUser=result.user;
+    Local.setLoggedOut(false);
     Local.setName(name); userProfile={name,color:colorForUid(currentUser.uid)}; ensureUserProfile();
     $('namePrompt').style.display='none'; afterAuthReady();
   }).catch(err=>{
@@ -1049,6 +1069,11 @@ function buildBrushGrid(){
   });
 }
 function selectBrush(id){
+  if(id==='eraser'){
+    if(tool.brush!=='eraser') tool.previousBrush=tool.brush;
+  } else {
+    tool.previousBrush=id;
+  }
   tool.brush = id;
   $('eraserQuick')?.classList.toggle('tool-active', id==='eraser');
   document.querySelectorAll('.brush-opt').forEach(e=> e.classList.toggle('active', e.dataset.id===id));
@@ -1079,7 +1104,9 @@ function setColor(c){
 
 function bindToolbar(){
   $('brushToggle').addEventListener('click', ()=> togglePanel('brushPanel'));
-  $('eraserQuick').addEventListener('click', ()=>{selectBrush('eraser'); $('eraserQuick').classList.add('tool-active'); toast('الممحاة مفعلة — تمسح أثناء السحب');});
+  $('eraserQuick').addEventListener('click', ()=>{
+    selectBrush(tool.brush==='eraser' ? (tool.previousBrush||'pencil') : 'eraser');
+  });
   $('colorToggle').addEventListener('click', ()=> togglePanel('colorPanel'));
   $('sizeToggle').addEventListener('click', ()=> togglePanel('sizePanel'));
   $('undoBtn').addEventListener('click', undo);
