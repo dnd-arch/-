@@ -70,6 +70,9 @@
   }
   .paper-card:hover{transform:translateY(-2px); box-shadow:var(--shadow-lg);}
   .paper-card:active{transform:scale(0.98);}
+  .paper-card{position:relative;}
+  .paper-delete{position:absolute;top:10px;left:10px;width:30px;height:30px;border:0;border-radius:50%;background:rgba(255,255,255,.92);color:#b54b4b;box-shadow:0 2px 8px rgba(60,50,40,.12);cursor:pointer;font-size:16px;z-index:2;}
+  .paper-delete:hover{background:#fff0f0;color:#d12e43;}
   .paper-thumb{
     width:100%; aspect-ratio:4/3; background:#fbfaf7 url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"><circle cx="1" cy="1" r="0.6" fill="%23e9e3d9"/></svg>');
     display:flex; align-items:center; justify-content:center;
@@ -111,6 +114,8 @@
   .modal button:active{transform:scale(0.97);}
   .btn-sub{background:var(--ink); color:#fff;}
   .btn-free{background:var(--accent-soft); color:var(--accent);}
+  .btn-sub.prank-shake{background:#d92f45;color:#fff;animation:prankShake .42s ease-in-out 0s 2;}
+  @keyframes prankShake{0%,100%{transform:translateX(0) rotate(0)}20%{transform:translateX(-7px) rotate(-2deg)}40%{transform:translateX(7px) rotate(2deg)}60%{transform:translateX(-5px) rotate(-1deg)}80%{transform:translateX(5px) rotate(1deg)}}
   .prank-msg{font-size:17px; line-height:1.9; font-weight:600; color:var(--ink);}
 
   /* ---------- Canvas view ---------- */
@@ -291,7 +296,7 @@
     </div>
     <div class="panel" id="sizePanel">
       <div class="panel-row"><label>الحجم</label><input type="range" id="sizeRange" min="1" max="80" value="6"></div>
-      <div class="panel-row"><label>الشفافية</label><input type="range" id="opacityRange" min="5" max="100" value="100"></div>
+      <div class="panel-row"><label>الشفافية</label><input type="range" id="opacityRange" min="5" max="100" value="100"></div><div class="panel-row"><label>تثبيت الخط</label><input type="range" id="stabilizeRange" min="0" max="100" value="45"></div>
     </div>
 
     <div class="toolbar" id="toolbar">
@@ -410,6 +415,7 @@ const tool = {
   color: '#2b2622',
   size: 6,
   opacity: 100,
+  stabilization: 45,
   recentColors: []
 };
 
@@ -482,35 +488,28 @@ function showLibrary(){
 }
 
 function loadLibrary(){
-  const idxRef = db.ref(`users/${currentUser.uid}/papers`);
-  idxRef.off();
-  idxRef.on('value', snap=>{
-    const idx = snap.val() || {};
-    const ids = Object.keys(idx);
+  // Shared library: every authenticated friend sees the same papers.
+  const papersRef = db.ref('papers');
+  papersRef.off('value');
+  papersRef.on('value', snap=>{
+    const all = snap.val() || {};
+    const idx = {};
+    const ids = Object.keys(all).filter(id=> all[id] && all[id].meta).map(id=>{ idx[id]=true; return id; });
     Local.setPapersIndex(idx);
-    if(ids.length===0){
-      $('libGrid').innerHTML='';
-      $('library').classList.remove('active');
-      $('libEmpty').style.display='flex';
-      return;
-    }
-    $('libEmpty').style.display='none';
-    $('library').classList.add('active');
-    renderLibraryCards(ids);
-  }, err=>{
-    // offline fallback — use cached index
-    const idx = Local.getPapersIndex();
-    const ids = Object.keys(idx);
-    if(ids.length===0){ $('libEmpty').style.display='flex'; }
-    else { renderLibraryCards(ids); }
+    if(ids.length===0){ $('libGrid').innerHTML=''; $('library').classList.remove('active'); $('libEmpty').style.display='flex'; return; }
+    $('libEmpty').style.display='none'; $('library').classList.add('active');
+    renderLibraryCards(ids, all);
+  }, ()=>{
+    const idx = Local.getPapersIndex(); const ids = Object.keys(idx);
+    if(ids.length===0) $('libEmpty').style.display='flex'; else renderLibraryCards(ids);
   });
 }
 
-function renderLibraryCards(ids){
+function renderLibraryCards(ids, sharedData){
   const grid = $('libGrid');
   grid.innerHTML='';
   const metaPromises = ids.map(id=>
-    db.ref(`papers/${id}/meta`).once('value').then(s=>({id, meta:s.val()}))
+    (sharedData && sharedData[id] && sharedData[id].meta ? Promise.resolve({id, meta:sharedData[id].meta}) : db.ref(`papers/${id}/meta`).once('value').then(s=>({id, meta:s.val()})))
       .catch(()=>({id, meta: (Local.getPaper(id)||{}).meta}))
   );
   Promise.all(metaPromises).then(results=>{
@@ -520,14 +519,16 @@ function renderLibraryCards(ids){
       const card = document.createElement('div');
       card.className='paper-card';
       const cached = Local.getPaper(id);
-      const thumb = cached && cached.thumb ? `<img src="${cached.thumb}">` : `<div class="ph">✎</div>`;
+      const thumb = meta.thumb || (cached && cached.thumb) ? `<img src="${meta.thumb || cached.thumb}">` : `<div class="ph">✎</div>`;
       card.innerHTML = `
+        <button class="paper-delete" title="حذف الصفحة" aria-label="حذف الصفحة">×</button>
         <div class="paper-thumb">${thumb}</div>
         <div class="paper-meta">
           <div class="paper-name">${escapeHtml(meta.name||'ورقة')}</div>
-          <div class="paper-time">${timeAgo(meta.updatedAt)}</div>
+          <div class="paper-time">أُنشئت ${new Date(meta.createdAt || meta.updatedAt || Date.now()).toLocaleDateString('ar-SA')}</div>
         </div>`;
       card.addEventListener('click', ()=> navigateToPaper(id));
+      card.querySelector('.paper-delete').addEventListener('click', e=>{ e.stopPropagation(); deletePaper(id, meta); });
       grid.appendChild(card);
     });
     const tile = document.createElement('div');
@@ -546,12 +547,12 @@ $('createBtnTop').addEventListener('click', createNewPaper);
 $('createBtnEmpty').addEventListener('click', createNewPaper);
 
 function createNewPaper(){
+  const name = (window.prompt('اكتب اسم الصفحة الجديدة', 'ورقة جديدة') || '').trim();
+  if(!name) return;
   const id = uid8();
+  const created = nowTs();
   const meta = {
-    ownerId: currentUser.uid,
-    name: 'ورقة بلا اسم',
-    createdAt: nowTs(),
-    updatedAt: nowTs(),
+    ownerId: currentUser.uid, name, createdAt: created, updatedAt: created,
     members: { [currentUser.uid]: true }
   };
   db.ref(`papers/${id}/meta`).set(meta)
@@ -569,6 +570,14 @@ function createNewPaper(){
       Local.queuePush(id, {type:'create_meta', meta});
       navigateToPaper(id, !Local.hasSeenPrank());
     });
+}
+
+function deletePaper(id, meta){
+  if(!window.confirm(`حذف الصفحة «${meta?.name || 'ورقة'}» نهائياً؟`)) return;
+  db.ref(`papers/${id}`).remove().then(()=>{
+    localStorage.removeItem(LS_PREFIX+'paper_'+id); localStorage.removeItem(LS_PREFIX+'strokes_'+id);
+    const idx=Local.getPapersIndex(); delete idx[id]; Local.setPapersIndex(idx); toast('تم حذف الصفحة');
+  }).catch(()=>toast('تعذر حذف الصفحة — تحقق من الاتصال'));
 }
 
 function navigateToPaper(id, showPrank){
@@ -602,7 +611,7 @@ function maybeShowPrank(id, force){
     </div>`;
   document.body.appendChild(ov);
   $('prankSub').addEventListener('click', ()=>{
-    ov.querySelector('.modal').innerHTML = `<div class="prank-msg">هههه لا ماكاش بايبال ولا فيزا هنا 😂<br>جرب الزر الثاني</div>`;
+    const btn = $('prankSub'); btn.classList.remove('prank-shake'); void btn.offsetWidth; btn.classList.add('prank-shake');
   });
   $('prankFree').addEventListener('click', ()=>{
     Local.setSeenPrank();
@@ -774,391 +783,141 @@ function sendCursor(worldX, worldY){
 /* =========================================================
    CANVAS ENGINE
 ========================================================= */
+function stableNoise(seed){const x=Math.sin(seed*12.9898)*43758.5453;return x-Math.floor(x);}
+function smoothPath(ctx,pts){
+  ctx.beginPath(); if(!pts.length)return; ctx.moveTo(pts[0].x,pts[0].y);
+  if(pts.length===1){ctx.lineTo(pts[0].x+.01,pts[0].y+.01);return;}
+  for(let i=1;i<pts.length-1;i++){const mx=(pts[i].x+pts[i+1].x)/2,my=(pts[i].y+pts[i+1].y)/2;ctx.quadraticCurveTo(pts[i].x,pts[i].y,mx,my);}
+  const a=pts[pts.length-2],b=pts[pts.length-1];ctx.quadraticCurveTo(a.x,a.y,b.x,b.y);
+}
+function strokePath(ctx,pts,size){
+  ctx.lineWidth=Math.max(1,size);ctx.lineCap='round';ctx.lineJoin='round';
+  if(pts.length===1){ctx.beginPath();ctx.arc(pts[0].x,pts[0].y,Math.max(.5,size/2),0,Math.PI*2);ctx.fill();return;}
+  smoothPath(ctx,pts);ctx.stroke();
+}
+function paintStroke(ctx,s){
+  const pts=s.points||[];if(!pts.length)return;const alpha=Math.max(0,Math.min(1,(s.opacity??100)/100));
+  ctx.save();ctx.globalCompositeOperation=s.brush==='eraser'?'destination-out':'source-over';ctx.globalAlpha=alpha;
+  const pressure=(p)=>Math.max(.35,Math.min(1.5,(p?.p??.5)*1.35));
+  if(s.brush==='eraser'){ctx.fillStyle='#000';ctx.strokeStyle='#000';strokePath(ctx,pts,s.size*1.25);ctx.restore();return;}
+  ctx.strokeStyle=s.color||'#2b2622';ctx.fillStyle=s.color||'#2b2622';ctx.lineCap='round';ctx.lineJoin='round';
+  if(s.brush==='pencil'){
+    for(let i=1;i<pts.length;i++){ctx.globalAlpha=alpha*(.65+pressure(pts[i])*.22);ctx.lineWidth=Math.max(.6,s.size*.42*pressure(pts[i]));ctx.beginPath();ctx.moveTo(pts[i-1].x,pts[i-1].y);ctx.lineTo(pts[i].x,pts[i].y);ctx.stroke();}
+  } else if(s.brush==='smooth'){
+    ctx.globalAlpha=alpha;ctx.lineWidth=s.size*.62;strokePath(ctx,pts,ctx.lineWidth);
+  } else if(s.brush==='ink'){
+    for(let i=1;i<pts.length;i++){ctx.globalAlpha=alpha;ctx.lineWidth=Math.max(.8,s.size*.72*pressure(pts[i]));ctx.beginPath();ctx.moveTo(pts[i-1].x,pts[i-1].y);ctx.lineTo(pts[i].x,pts[i].y);ctx.stroke();}
+  } else if(s.brush==='marker'){
+    ctx.globalAlpha=alpha*.48;ctx.lineWidth=s.size*1.05;strokePath(ctx,pts,ctx.lineWidth);
+  } else if(s.brush==='crayon'){
+    for(let k=-1;k<=1;k++){ctx.globalAlpha=alpha*.25;ctx.lineWidth=Math.max(1,s.size*.28);ctx.beginPath();ctx.moveTo(pts[0].x+k*s.size*.16,pts[0].y-k*s.size*.12);for(let i=1;i<pts.length;i++)ctx.lineTo(pts[i].x+k*s.size*.16,pts[i].y-k*s.size*.12);ctx.stroke();}
+  } else if(s.brush==='watercolor'){
+    for(let k=0;k<4;k++){ctx.globalAlpha=alpha*.10;ctx.lineWidth=s.size*(.75+k*.22);strokePath(ctx,pts,ctx.lineWidth);}
+  } else if(s.brush==='oil'){
+    for(let k=0;k<4;k++){ctx.globalAlpha=alpha*.22;ctx.lineWidth=Math.max(1,s.size*.32);ctx.beginPath();for(let i=0;i<pts.length;i++){const off=(stableNoise((s.seed||1)+i*31+k*997)-.5)*s.size*.35;if(i===0)ctx.moveTo(pts[i].x+off,pts[i].y+off);else ctx.lineTo(pts[i].x+off,pts[i].y+off);}ctx.stroke();}
+  } else if(s.brush==='airbrush'){
+    for(let i=0;i<pts.length;i++){for(let k=0;k<12;k++){const a=stableNoise((s.seed||1)+i*73+k*911)*Math.PI*2,r=stableNoise((s.seed||1)+i*131+k*577)*s.size;ctx.globalAlpha=alpha*.035;ctx.beginPath();ctx.arc(pts[i].x+Math.cos(a)*r,pts[i].y+Math.sin(a)*r,Math.max(.7,s.size*.1),0,Math.PI*2);ctx.fill();}}
+  } else if(s.brush==='glow'){
+    ctx.globalAlpha=alpha*.9;ctx.shadowColor=s.color;ctx.shadowBlur=s.size*1.5;ctx.lineWidth=Math.max(1,s.size*.35);strokePath(ctx,pts,ctx.lineWidth);ctx.shadowBlur=0;
+  } else if(s.brush==='soft'){
+    ctx.globalAlpha=alpha*.52;ctx.filter=`blur(${Math.max(1,s.size*.18)}px)`;ctx.lineWidth=s.size*.75;strokePath(ctx,pts,ctx.lineWidth);ctx.filter='none';
+  } else if(s.brush==='pixel'){
+    const g=Math.max(3,s.size*.5);ctx.globalAlpha=alpha;pts.forEach(q=>{const x=Math.round(q.x/g)*g,y=Math.round(q.y/g)*g;ctx.fillRect(x-g/2,y-g/2,g,g);});
+  } else {ctx.globalAlpha=alpha;ctx.lineWidth=s.size*.6;strokePath(ctx,pts,ctx.lineWidth);}
+  ctx.restore();
+}
+
 let dCanvas, dCtx, lCanvas, lCtx;
-let view = { x:0, y:0, scale:1 }; // pan (world origin screen pos) & zoom
-let currentStrokeId = null;
-let currentPoints = [];
-let drawing = false;
-let lastActiveSend = 0;
+let view = { x:0, y:0, scale:1 };
+let currentStrokeId = null, currentPoints = [], drawing = false;
+let lastActiveSend = 0, panMode = false, lastPan = null, spaceDown = false;
+let pointers = new Map(), pinchState = null;
 
 function initCanvasIfNeeded(){
   if(dCanvas) return;
-  dCanvas = $('drawCanvas'); dCtx = dCanvas.getContext('2d');
-  lCanvas = $('liveCanvas'); lCtx = lCanvas.getContext('2d');
-  window.addEventListener('resize', ()=>{ resizeCanvases(); redrawAll(); });
-
-  dCanvas.addEventListener('pointerdown', onPointerDown);
-  window.addEventListener('pointermove', onPointerMove);
-  window.addEventListener('pointerup', onPointerUp);
-  window.addEventListener('pointercancel', onPointerUp);
+  dCanvas=$('drawCanvas'); dCtx=dCanvas.getContext('2d',{alpha:true});
+  lCanvas=$('liveCanvas'); lCtx=lCanvas.getContext('2d',{alpha:true});
+  dCanvas.addEventListener('pointerdown', onPointerDown, {passive:false});
+  dCanvas.addEventListener('pointermove', onPointerMove, {passive:false});
+  dCanvas.addEventListener('pointerup', onPointerUp, {passive:false});
+  dCanvas.addEventListener('pointercancel', onPointerUp, {passive:false});
   dCanvas.addEventListener('wheel', onWheel, {passive:false});
-
-  // pinch / pan (touch)
-  let touches = {};
-  dCanvas.addEventListener('touchstart', e=>{
-    for(const t of e.changedTouches) touches[t.identifier]={x:t.clientX,y:t.clientY};
-  }, {passive:true});
-  dCanvas.addEventListener('touchmove', e=>{
-    const ids = Object.keys(touches);
-    if(e.touches.length===2){
-      e.preventDefault();
-      const t0=e.touches[0], t1=e.touches[1];
-      const prev0=touches[t0.identifier], prev1=touches[t1.identifier];
-      if(prev0 && prev1){
-        const prevDist = Math.hypot(prev0.x-prev1.x, prev0.y-prev1.y);
-        const newDist = Math.hypot(t0.clientX-t1.clientX, t0.clientY-t1.clientY);
-        const cx = (t0.clientX+t1.clientX)/2, cy=(t0.clientY+t1.clientY)/2;
-        const scaleDelta = newDist/Math.max(prevDist,1);
-        zoomAt(cx, cy, scaleDelta);
-        const prevCx=(prev0.x+prev1.x)/2, prevCy=(prev0.y+prev1.y)/2;
-        view.x += cx-prevCx; view.y += cy-prevCy;
-        redrawAll();
-      }
-      touches[t0.identifier]={x:t0.clientX,y:t0.clientY};
-      touches[t1.identifier]={x:t1.clientX,y:t1.clientY};
-    }
-  }, {passive:false});
-  dCanvas.addEventListener('touchend', e=>{
-    for(const t of e.changedTouches) delete touches[t.identifier];
-  }, {passive:true});
-
-  window.addEventListener('keydown', onKeydown);
-  buildBrushGrid();
-  buildColorGrid();
-  bindToolbar();
+  window.addEventListener('resize', ()=>{ resizeCanvases(); redrawAll(); renderLivePreviews({}); });
+  window.addEventListener('keydown', onKeydown); window.addEventListener('keyup', e=>{if(e.code==='Space')spaceDown=false;});
+  buildBrushGrid(); buildColorGrid(); bindToolbar();
 }
-
 function resizeCanvases(){
-  [dCanvas, lCanvas].forEach(c=>{
-    c.width = window.innerWidth * devicePixelRatio;
-    c.height = window.innerHeight * devicePixelRatio;
-    c.style.width = window.innerWidth+'px';
-    c.style.height = window.innerHeight+'px';
-  });
-  if(view.x===0 && view.y===0 && view.scale===1){
-    view.x = window.innerWidth/2; view.y = window.innerHeight/2;
-  }
+  const ratio=Math.max(1,Math.min(3,window.devicePixelRatio||1));
+  [dCanvas,lCanvas].forEach(c=>{c.width=Math.round(innerWidth*ratio);c.height=Math.round(innerHeight*ratio);c.style.width=innerWidth+'px';c.style.height=innerHeight+'px';});
+  dCanvas._ratio=ratio; lCanvas._ratio=ratio;
+  if(!dCanvas._didCenter){view.x=innerWidth/2;view.y=innerHeight/2;view.scale=1;dCanvas._didCenter=true;}
 }
-
-function worldToScreen(x,y){ return { x: x*view.scale + view.x, y: y*view.scale + view.y }; }
-function screenToWorld(x,y){ return { x: (x-view.x)/view.scale, y: (y-view.y)/view.scale }; }
-
-function applyTransform(ctx){
-  ctx.setTransform(devicePixelRatio*view.scale,0,0,devicePixelRatio*view.scale, devicePixelRatio*view.x, devicePixelRatio*view.y);
-}
-
+function worldToScreen(x,y){return{x:x*view.scale+view.x,y:y*view.scale+view.y};}
+function screenToWorld(x,y){return{x:(x-view.x)/view.scale,y:(y-view.y)/view.scale};}
+function applyTransform(ctx){const r=ctx.canvas._ratio||1;ctx.setTransform(r*view.scale,0,0,r*view.scale,r*view.x,r*view.y);}
 function redrawAll(){
-  dCtx.setTransform(1,0,0,1,0,0);
-  dCtx.clearRect(0,0,dCanvas.width,dCanvas.height);
-  applyTransform(dCtx);
-  Object.values(strokes).sort((a,b)=>a.createdAt-b.createdAt).forEach(s=> paintStroke(dCtx, s));
-  $('zoomIndicator').textContent = Math.round(view.scale*100)+'%';
+  if(!dCtx)return; dCtx.setTransform(1,0,0,1,0,0);dCtx.clearRect(0,0,dCanvas.width,dCanvas.height);applyTransform(dCtx);
+  Object.values(strokes).sort((a,b)=>(a.createdAt||0)-(b.createdAt||0)).forEach(s=>paintStroke(dCtx,s));
+  $('zoomIndicator').textContent=Math.round(view.scale*100)+'%';
 }
-
-function drawStroke(s){ applyTransform(dCtx); paintStroke(dCtx, s); }
-
-/* ---- Brush rendering: each brush genuinely differs ---- */
-function paintStroke(ctx, s){
-  const pts = s.points;
-  if(!pts || pts.length===0) return;
-  ctx.save();
-  ctx.lineJoin='round'; ctx.lineCap='round';
-  const col = s.color;
-  const baseAlpha = (s.opacity ?? 100)/100;
-
-  if(s.brush==='eraser'){
-    ctx.globalCompositeOperation='destination-out';
-    strokePath(ctx, pts, s.size, 1, false);
-    ctx.restore();
-    return;
-  }
-  ctx.globalCompositeOperation='source-over';
-
-  switch(s.brush){
-    case 'pencil':
-      ctx.globalAlpha = baseAlpha*0.85;
-      ctx.strokeStyle = col;
-      for(let i=1;i<pts.length;i++){
-        const jitter = (Math.sin(i*12.9898)*43758.5453 % 1)*0.6;
-        ctx.lineWidth = Math.max(0.6, s.size*0.4*(pts[i].p||0.5)+jitter*0.4);
-        ctx.beginPath();
-        ctx.moveTo(pts[i-1].x, pts[i-1].y);
-        ctx.lineTo(pts[i].x, pts[i].y);
-        ctx.stroke();
-      }
-      break;
-    case 'smooth':
-      ctx.globalAlpha = baseAlpha;
-      ctx.strokeStyle = col;
-      ctx.lineWidth = s.size*0.5;
-      smoothPath(ctx, pts);
-      ctx.stroke();
-      break;
-    case 'ink':
-      ctx.globalAlpha = baseAlpha;
-      ctx.fillStyle = col;
-      for(let i=1;i<pts.length;i++){
-        const w = Math.max(1, s.size*0.6*(pts[i].p||0.6));
-        drawVariableSegment(ctx, pts[i-1], pts[i], w);
-      }
-      break;
-    case 'marker':
-      ctx.globalAlpha = baseAlpha*0.55;
-      ctx.strokeStyle = col;
-      ctx.lineWidth = s.size*0.9;
-      smoothPath(ctx, pts);
-      ctx.stroke();
-      break;
-    case 'crayon':
-      ctx.strokeStyle = col;
-      for(let i=1;i<pts.length;i++){
-        for(let k=0;k<3;k++){
-          const off = (k-1)*s.size*0.18;
-          ctx.globalAlpha = baseAlpha*0.28;
-          ctx.lineWidth = Math.max(0.5, s.size*0.22);
-          ctx.beginPath();
-          ctx.moveTo(pts[i-1].x+off, pts[i-1].y-off*0.5);
-          ctx.lineTo(pts[i].x+off, pts[i].y-off*0.5);
-          ctx.stroke();
-        }
-      }
-      break;
-    case 'watercolor':
-      ctx.strokeStyle = col;
-      for(let i=1;i<pts.length;i++){
-        for(let k=0;k<4;k++){
-          ctx.globalAlpha = baseAlpha*0.06;
-          ctx.lineWidth = s.size*(0.8+k*0.35);
-          ctx.beginPath();
-          ctx.moveTo(pts[i-1].x, pts[i-1].y);
-          ctx.lineTo(pts[i].x, pts[i].y);
-          ctx.stroke();
-        }
-      }
-      break;
-    case 'oil':
-      ctx.strokeStyle = col;
-      for(let i=1;i<pts.length;i++){
-        for(let k=0;k<5;k++){
-          const off = (Math.random()-0.5)*s.size*0.5;
-          ctx.globalAlpha = baseAlpha*0.22;
-          ctx.lineWidth = Math.max(0.8, s.size*0.28);
-          ctx.beginPath();
-          ctx.moveTo(pts[i-1].x+off, pts[i-1].y+off);
-          ctx.lineTo(pts[i].x+off, pts[i].y+off);
-          ctx.stroke();
-        }
-      }
-      break;
-    case 'airbrush':
-      ctx.fillStyle = col;
-      for(let i=0;i<pts.length;i++){
-        for(let k=0;k<8;k++){
-          const ang = Math.random()*Math.PI*2, rad = Math.random()*s.size;
-          ctx.globalAlpha = baseAlpha*0.05;
-          ctx.beginPath();
-          ctx.arc(pts[i].x+Math.cos(ang)*rad, pts[i].y+Math.sin(ang)*rad, 1.1, 0, 7);
-          ctx.fill();
-        }
-      }
-      break;
-    case 'glow':
-      ctx.strokeStyle = col;
-      ctx.shadowColor = col; ctx.shadowBlur = s.size*1.4;
-      ctx.globalAlpha = baseAlpha*0.9;
-      ctx.lineWidth = Math.max(1,s.size*0.28);
-      smoothPath(ctx, pts); ctx.stroke();
-      ctx.shadowBlur=0;
-      break;
-    case 'soft':
-      ctx.strokeStyle = col;
-      ctx.filter = `blur(${Math.max(1,s.size*0.15)}px)`;
-      ctx.globalAlpha = baseAlpha*0.7;
-      ctx.lineWidth = s.size*0.6;
-      smoothPath(ctx, pts); ctx.stroke();
-      ctx.filter='none';
-      break;
-    case 'pixel':
-      ctx.fillStyle = col; ctx.globalAlpha = baseAlpha;
-      const grid = Math.max(3, s.size*0.5);
-      pts.forEach(p=>{
-        const gx = Math.round(p.x/grid)*grid, gy = Math.round(p.y/grid)*grid;
-        ctx.fillRect(gx-grid/2, gy-grid/2, grid, grid);
-      });
-      break;
-    default:
-      ctx.globalAlpha = baseAlpha; ctx.strokeStyle = col; ctx.lineWidth = s.size*0.5;
-      smoothPath(ctx, pts); ctx.stroke();
-  }
-  ctx.restore();
-}
-function strokePath(ctx, pts, size, alpha, smooth){
-  ctx.globalAlpha = alpha; ctx.lineWidth = size*0.6; ctx.strokeStyle='#000';
-  if(smooth) smoothPath(ctx, pts); else { ctx.beginPath(); pts.forEach((p,i)=> i===0?ctx.moveTo(p.x,p.y):ctx.lineTo(p.x,p.y)); }
-  ctx.stroke();
-}
-function smoothPath(ctx, pts){
-  ctx.beginPath();
-  if(pts.length<3){ pts.forEach((p,i)=> i===0?ctx.moveTo(p.x,p.y):ctx.lineTo(p.x,p.y)); return; }
-  ctx.moveTo(pts[0].x, pts[0].y);
-  for(let i=1;i<pts.length-1;i++){
-    const mx = (pts[i].x+pts[i+1].x)/2, my=(pts[i].y+pts[i+1].y)/2;
-    ctx.quadraticCurveTo(pts[i].x, pts[i].y, mx, my);
-  }
-}
-function drawVariableSegment(ctx, a, b, w){
-  const dx=b.x-a.x, dy=b.y-a.y, len=Math.hypot(dx,dy)||1;
-  const nx=-dy/len*w/2, ny=dx/len*w/2;
-  ctx.beginPath();
-  ctx.moveTo(a.x+nx, a.y+ny);
-  ctx.lineTo(b.x+nx, b.y+ny);
-  ctx.lineTo(b.x-nx, b.y-ny);
-  ctx.lineTo(a.x-nx, a.y-ny);
-  ctx.closePath();
-  ctx.fill();
-}
-
-/* ---- Live (in-progress) preview for both local drawing and remote active strokes ---- */
+function drawStroke(s){redrawAll();}
 function renderLivePreviews(activeMap){
-  lCtx.setTransform(1,0,0,1,0,0);
-  lCtx.clearRect(0,0,lCanvas.width,lCanvas.height);
-  applyTransform(lCtx);
-  Object.keys(activeMap).forEach(uidKey=>{
-    if(uidKey===currentUser.uid) return;
-    const s = activeMap[uidKey];
-    if(s && s.points && s.points.length) paintStroke(lCtx, s);
-  });
-  if(drawing && currentPoints.length){
-    paintStroke(lCtx, {brush:tool.brush, color:tool.color, size:tool.size, opacity:tool.opacity, points:currentPoints});
-  }
+  if(!lCtx)return; lCtx.setTransform(1,0,0,1,0,0);lCtx.clearRect(0,0,lCanvas.width,lCanvas.height);applyTransform(lCtx);
+  Object.values(strokes).sort((a,b)=>(a.createdAt||0)-(b.createdAt||0)).forEach(s=>paintStroke(lCtx,s));
+  Object.keys(activeMap||{}).forEach(uid=>{if(uid!==currentUser.uid&&activeMap[uid]?.points?.length)paintStroke(lCtx,activeMap[uid]);});
+  if(drawing&&currentPoints.length)paintStroke(lCtx,{brush:tool.brush,color:tool.color,size:tool.size,opacity:tool.opacity,points:currentPoints,seed:0});
 }
-
-/* ---- Pointer handling ---- */
-let panMode = false, lastPan = null, spaceDown = false;
+function smoothInputPoint(world){
+  const last=currentPoints[currentPoints.length-1];
+  if(!last)return world;
+  const amount=Math.max(0,Math.min(.88,(tool.stabilization||0)/100*.88));
+  return {x:last.x+(world.x-last.x)*(1-amount),y:last.y+(world.y-last.y)*(1-amount)};
+}
 function onPointerDown(e){
-  if(e.button===1 || spaceDown){ panMode=true; lastPan={x:e.clientX,y:e.clientY}; return; }
-  if(e.pointerType==='touch' && e.isPrimary===false) return;
-  drawing = true;
-  currentStrokeId = uid8();
-  currentPoints = [];
-  addPoint(e);
-  dCanvas.setPointerCapture(e.pointerId);
+  e.preventDefault(); pointers.set(e.pointerId,{x:e.clientX,y:e.clientY});
+  if(pointers.size>=2){ if(drawing){drawing=false;currentPoints=[];db.ref(`papers/${currentPaperId}/activeStrokes/${currentUser.uid}`).remove();} beginPinch(); return; }
+  if(e.button===1||spaceDown){panMode=true;lastPan={x:e.clientX,y:e.clientY};dCanvas.setPointerCapture(e.pointerId);return;}
+  drawing=true;currentStrokeId=uid8();currentPoints=[];addPoint(e);dCanvas.setPointerCapture(e.pointerId);renderLivePreviews({});
 }
+function beginPinch(){const a=[...pointers.values()];pinchState={distance:Math.max(1,Math.hypot(a[0].x-a[1].x,a[0].y-a[1].y)),center:{x:(a[0].x+a[1].x)/2,y:(a[0].y+a[1].y)/2},world:screenToWorld((a[0].x+a[1].x)/2,(a[0].y+a[1].y)/2)};}
 function onPointerMove(e){
-  const world = screenToWorld(e.clientX, e.clientY);
-  sendCursor(world.x, world.y);
-  if(panMode && lastPan){
-    view.x += e.clientX-lastPan.x; view.y += e.clientY-lastPan.y;
-    lastPan = {x:e.clientX,y:e.clientY};
-    redrawAll(); renderLivePreviews({});
-    return;
+  e.preventDefault(); if(pointers.has(e.pointerId))pointers.set(e.pointerId,{x:e.clientX,y:e.clientY});
+  if(pointers.size>=2){
+    const a=[...pointers.values()], dist=Math.max(1,Math.hypot(a[0].x-a[1].x,a[0].y-a[1].y)),cx=(a[0].x+a[1].x)/2,cy=(a[0].y+a[1].y)/2;
+    if(!pinchState)beginPinch(); const factor=dist/pinchState.distance;view.scale=Math.max(.1,Math.min(8,view.scale*factor));
+    const after=worldToScreen(pinchState.world.x,pinchState.world.y);view.x+=cx-after.x;view.y+=cy-after.y;pinchState.distance=dist;pinchState.world=screenToWorld(cx,cy);redrawAll();renderLivePreviews({});return;
   }
-  if(!drawing) return;
-  addPoint(e);
-  throttledBroadcastActive();
-  renderLivePreviews({});
+  const world=screenToWorld(e.clientX,e.clientY);sendCursor(world.x,world.y);
+  if(panMode&&lastPan){view.x+=e.clientX-lastPan.x;view.y+=e.clientY-lastPan.y;lastPan={x:e.clientX,y:e.clientY};redrawAll();renderLivePreviews({});return;}
+  if(!drawing)return;addPoint(e);throttledBroadcastActive();renderLivePreviews({});
 }
 function onPointerUp(e){
-  if(panMode){ panMode=false; lastPan=null; return; }
-  if(!drawing) return;
-  drawing = false;
-  finalizeStroke();
+  e.preventDefault();pointers.delete(e.pointerId);
+  if(pointers.size<2)pinchState=null;
+  if(panMode){panMode=false;lastPan=null;return;}
+  if(!drawing)return;drawing=false;finalizeStroke();renderLivePreviews({});
 }
 function addPoint(e){
-  const world = screenToWorld(e.clientX, e.clientY);
-  const pressure = e.pressure && e.pressure>0 ? e.pressure : 0.5;
-  const last = currentPoints[currentPoints.length-1];
-  if(last && Math.hypot(world.x-last.x, world.y-last.y) < (1.2/view.scale)) return;
-  currentPoints.push({x:world.x, y:world.y, p:pressure});
+  const raw=screenToWorld(e.clientX,e.clientY), world=smoothInputPoint(raw), pressure=e.pressure>0?e.pressure:.5;
+  const last=currentPoints[currentPoints.length-1]; if(last&&Math.hypot(world.x-last.x,world.y-last.y)<Math.max(.35,1.2/view.scale))return;
+  currentPoints.push({x:world.x,y:world.y,p:pressure});
 }
 function throttledBroadcastActive(){
-  if(!currentPaperId) return;
-  const t = performance.now();
-  if(t-lastActiveSend < 55) return;
-  lastActiveSend = t;
-  db.ref(`papers/${currentPaperId}/activeStrokes/${currentUser.uid}`).set({
-    brush:tool.brush, color:tool.color, size:tool.size, opacity:tool.opacity, points:currentPoints.slice(-40)
-  }).catch(()=>{});
+  if(!currentPaperId)return;const t=performance.now();if(t-lastActiveSend<35)return;lastActiveSend=t;
+  db.ref(`papers/${currentPaperId}/activeStrokes/${currentUser.uid}`).set({brush:tool.brush,color:tool.color,size:tool.size,opacity:tool.opacity,points:currentPoints.slice(-60),seed:0}).catch(()=>{});
 }
 function finalizeStroke(){
-  if(currentPoints.length<1){ currentPoints=[]; return; }
-  const stroke = {
-    userId: currentUser.uid,
-    brush: tool.brush,
-    color: tool.color,
-    size: tool.size,
-    opacity: tool.opacity,
-    points: currentPoints,
-    createdAt: nowTs()
-  };
-  const sid = currentStrokeId;
-  strokes[sid] = stroke;
-  undoStack.push(sid);
-  redoStack = [];
-  persistStrokesLocal();
-  redrawAll();
-  currentPoints = [];
-  currentStrokeId = null;
-
-  if(currentPaperId){
-    db.ref(`papers/${currentPaperId}/strokes/${sid}`).set(stroke)
-      .then(()=>{
-        db.ref(`papers/${currentPaperId}/activeStrokes/${currentUser.uid}`).remove();
-        db.ref(`papers/${currentPaperId}/meta/updatedAt`).set(nowTs());
-      })
-      .catch(()=>{
-        Local.queuePush(currentPaperId, {type:'add_stroke', id:sid, stroke});
-        setOfflineBadge(true);
-      });
-  }
+  if(!currentPoints.length){currentPoints=[];return;}
+  const stroke={userId:currentUser.uid,brush:tool.brush,color:tool.color,size:tool.size,opacity:tool.opacity,points:currentPoints,createdAt:nowTs(),seed:Math.floor(Math.random()*100000)};
+  const sid=currentStrokeId;strokes[sid]=stroke;undoStack.push(sid);redoStack=[];persistStrokesLocal();redrawAll();currentPoints=[];currentStrokeId=null;
+  if(currentPaperId)db.ref(`papers/${currentPaperId}/strokes/${sid}`).set(stroke).then(()=>db.ref(`papers/${currentPaperId}/activeStrokes/${currentUser.uid}`).remove()).then(()=>db.ref(`papers/${currentPaperId}/meta/updatedAt`).set(nowTs())).catch(()=>{Local.queuePush(currentPaperId,{type:'add_stroke',id:sid,stroke});setOfflineBadge(true);});
   scheduleThumbUpdate();
 }
-function undo(){
-  const sid = undoStack.pop();
-  if(!sid) return;
-  const s = strokes[sid];
-  redoStack.push({id:sid, stroke:s});
-  delete strokes[sid];
-  persistStrokesLocal();
-  redrawAll();
-  if(currentPaperId) db.ref(`papers/${currentPaperId}/strokes/${sid}`).remove().catch(()=>{
-    Local.queuePush(currentPaperId, {type:'remove_stroke', id:sid});
-  });
-}
-function redo(){
-  const item = redoStack.pop();
-  if(!item) return;
-  strokes[item.id] = item.stroke;
-  undoStack.push(item.id);
-  persistStrokesLocal();
-  redrawAll();
-  if(currentPaperId) db.ref(`papers/${currentPaperId}/strokes/${item.id}`).set(item.stroke).catch(()=>{
-    Local.queuePush(currentPaperId, {type:'add_stroke', id:item.id, stroke:item.stroke});
-  });
-}
-
-function onWheel(e){
-  e.preventDefault();
-  zoomAt(e.clientX, e.clientY, e.deltaY<0 ? 1.08 : 0.92);
-  redrawAll();
-}
-function zoomAt(cx, cy, factor){
-  const before = screenToWorld(cx,cy);
-  view.scale = Math.min(6, Math.max(0.15, view.scale*factor));
-  const after = worldToScreen(before.x, before.y);
-  view.x += cx-after.x; view.y += cy-after.y;
-}
-
-function onKeydown(e){
-  if(e.ctrlKey || e.metaKey){
-    if(e.key.toLowerCase()==='z' && e.shiftKey){ e.preventDefault(); redo(); return; }
-    if(e.key.toLowerCase()==='z'){ e.preventDefault(); undo(); return; }
-  }
-  if(e.code==='Space'){ spaceDown=true; }
-  if(e.key==='e') selectBrush('eraser');
-  if(e.key==='b') selectBrush('pencil');
-}
-window.addEventListener('keyup', e=>{ if(e.code==='Space') spaceDown=false; });
+function undo(){const sid=undoStack.pop();if(!sid)return;const s=strokes[sid];redoStack.push({id:sid,stroke:s});delete strokes[sid];persistStrokesLocal();redrawAll();renderLivePreviews({});if(currentPaperId)db.ref(`papers/${currentPaperId}/strokes/${sid}`).remove().catch(()=>Local.queuePush(currentPaperId,{type:'remove_stroke',id:sid}));}
+function redo(){const item=redoStack.pop();if(!item)return;strokes[item.id]=item.stroke;undoStack.push(item.id);persistStrokesLocal();redrawAll();renderLivePreviews({});if(currentPaperId)db.ref(`papers/${currentPaperId}/strokes/${item.id}`).set(item.stroke);}
+function onWheel(e){e.preventDefault();const before=screenToWorld(e.clientX,e.clientY);view.scale=Math.max(.1,Math.min(8,view.scale*(e.deltaY<0?1.1:.9090909)));const after=worldToScreen(before.x,before.y);view.x+=e.clientX-after.x;view.y+=e.clientY-after.y;redrawAll();renderLivePreviews({});}
+function zoomAt(cx,cy,factor){const before=screenToWorld(cx,cy);view.scale=Math.max(.1,Math.min(8,view.scale*factor));const after=worldToScreen(before.x,before.y);view.x+=cx-after.x;view.y+=cy-after.y;redrawAll();renderLivePreviews({});}
+function onKeydown(e){if(e.ctrlKey||e.metaKey){if(e.key.toLowerCase()==='z'&&e.shiftKey){e.preventDefault();redo();return;}if(e.key.toLowerCase()==='z'){e.preventDefault();undo();return;}}if(e.code==='Space'){spaceDown=true;e.preventDefault();}if(e.key==='e')selectBrush('eraser');if(e.key==='b')selectBrush('pencil');}
 
 /* =========================================================
    TOOLBAR / PANELS
@@ -1230,6 +989,7 @@ function bindToolbar(){
   $('zoomResetBtn').addEventListener('click', ()=>{ view.scale=1; view.x=innerWidth/2; view.y=innerHeight/2; redrawAll(); });
   $('sizeRange').addEventListener('input', e=>{ tool.size = +e.target.value; });
   $('opacityRange').addEventListener('input', e=>{ tool.opacity = +e.target.value; });
+  $('stabilizeRange').addEventListener('input', e=>{ tool.stabilization = +e.target.value; });
   $('colorNative').addEventListener('input', e=> setColor(e.target.value));
   $('hexInput').addEventListener('change', e=>{
     let v = e.target.value.trim();
@@ -1309,6 +1069,10 @@ function generateThumb(){
   const p = Local.getPaper(currentPaperId) || {};
   p.thumb = dataUrl; p.meta = currentPaperMeta;
   Local.setPaper(currentPaperId, p);
+  if(currentPaperMeta){
+    currentPaperMeta.thumb = dataUrl;
+    db.ref(`papers/${currentPaperId}/meta/thumb`).set(dataUrl).catch(()=>{});
+  }
 }
 
 /* =========================================================
