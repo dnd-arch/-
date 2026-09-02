@@ -147,20 +147,33 @@
     display:flex; align-items:center; justify-content:center; font-size:9px; color:#fff; font-weight:700;
   }
 
+  .page-name-modal{position:fixed;inset:0;background:rgba(40,32,26,.32);backdrop-filter:blur(3px);display:none;align-items:center;justify-content:center;z-index:4500;padding:20px;}
+  .page-name-modal.active{display:flex;}
+  .page-name-box{background:#fff;border-radius:22px;padding:24px;width:min(360px,100%);box-shadow:var(--shadow-lg);text-align:right;}
+  .page-name-box h3{margin:0 0 8px;font-size:18px;}
+  .page-name-box p{margin:0 0 16px;color:var(--muted);font-size:12px;}
+  .page-name-box input{width:100%;padding:13px;border:1px solid var(--line);border-radius:12px;font-family:Cairo;font-size:14px;}
+  .page-name-actions{display:flex;gap:8px;margin-top:14px;}
+  .page-name-actions button{flex:1;border:0;border-radius:12px;padding:12px;font-family:Cairo;cursor:pointer;}
+  .page-name-actions .ok{background:var(--ink);color:#fff;}
+  .page-name-actions .cancel{background:var(--accent-soft);color:var(--accent);}
+  .tool-hint{font-size:11px;color:var(--muted);text-align:center;margin-top:6px;}
   .toolbar{
     position:absolute; bottom:16px; left:50%; transform:translateX(-50%); z-index:20;
-    background:rgba(255,255,255,0.92); backdrop-filter:blur(10px); border:1px solid var(--line);
-    border-radius:22px; box-shadow:var(--shadow-lg); padding:10px 12px;
+    background:rgba(255,255,255,0.96); backdrop-filter:blur(18px); border:1px solid rgba(236,231,223,.9);
+    border-radius:18px; box-shadow:0 14px 42px rgba(35,29,24,.18),0 2px 8px rgba(35,29,24,.08); padding:9px 10px;
     display:flex; align-items:center; gap:6px; max-width:calc(100vw - 24px); overflow-x:auto;
   }
   .toolbar::-webkit-scrollbar{display:none;}
   .tb-btn{
-    width:38px; height:38px; border-radius:12px; border:none; background:transparent; cursor:pointer;
+    width:42px; height:42px; border-radius:12px; border:none; background:transparent; cursor:pointer;
     display:flex; align-items:center; justify-content:center; font-size:16px; color:var(--ink); flex:none;
-    transition:background .15s, transform .15s;
+    transition:background .15s, transform .15s, color .15s; position:relative;
   }
+  .tb-btn:hover{background:#f7f2ed;color:var(--accent);}
   .tb-btn:active{transform:scale(0.9);}
   .tb-btn.active{background:var(--accent-soft); color:var(--accent);}
+  .tb-btn.tool-active{background:var(--ink);color:#fff;box-shadow:0 3px 8px rgba(43,38,34,.18);}
   .tb-sep{width:1px; height:24px; background:var(--line); flex:none; margin:0 2px;}
   .swatch{
     width:26px; height:26px; border-radius:50%; border:2px solid #fff; box-shadow:0 0 0 1.5px var(--line); flex:none; cursor:pointer;
@@ -193,7 +206,7 @@
   .hex-row input[type=color]{width:32px; height:32px; border:none; background:none; padding:0; cursor:pointer;}
 
   .zoom-indicator{
-    position:absolute; bottom:16px; right:16px; z-index:20; font-size:11px; color:var(--muted);
+    position:absolute; top:64px; right:16px; z-index:20; font-size:11px; color:var(--muted);
     background:rgba(255,255,255,0.88); border:1px solid var(--line); border-radius:999px; padding:6px 12px;
   }
 
@@ -206,12 +219,8 @@
     font-size:10px; color:#fff; padding:2px 7px; border-radius:8px; margin-top:2px; white-space:nowrap; box-shadow:0 1px 4px rgba(0,0,0,0.2);
   }
 
-  .toast{
-    position:fixed; bottom:26px; left:50%; transform:translateX(-50%) translateY(20px); z-index:2000;
-    background:var(--ink); color:#fff; padding:11px 20px; border-radius:14px; font-size:13px;
-    opacity:0; transition:all .3s ease; pointer-events:none; max-width:88vw; text-align:center;
-  }
-  .toast.show{opacity:1; transform:translateX(-50%) translateY(0);}
+  /* لا توجد رسائل عائمة مزعجة أسفل الشاشة؛ الحالة تظهر داخل الأدوات فقط. */
+  .toast,.toast.show{display:none!important;}
 
   .name-prompt{
     position:fixed; inset:0; background:var(--bg); z-index:5000; display:flex; align-items:center; justify-content:center; padding:24px;
@@ -263,7 +272,7 @@
   </div>
 
   <div class="lib-empty" id="libEmpty" style="display:none;">
-    <button class="create-btn" id="createBtnEmpty"><span class="plus">＋</span> Create a Paper</button>
+    <button class="create-btn" id="createBtnEmpty"><span class="plus">＋</span> ورقة جديدة</button>
   </div>
 
   <div id="canvasView">
@@ -300,12 +309,13 @@
     </div>
 
     <div class="toolbar" id="toolbar">
-      <button class="tb-btn" id="brushToggle" title="Brush">🖌</button>
-      <button class="tb-btn" id="colorToggle" title="Color"><span id="colorPreview" style="width:16px;height:16px;border-radius:50%;background:#2b2622;display:block;"></span></button>
-      <button class="tb-btn" id="sizeToggle" title="Size">◐</button>
+      <button class="tb-btn tool-active" id="brushToggle" title="مكتبة الفرش">🖌</button>
+      <button class="tb-btn" id="eraserQuick" title="ممحاة فورية">⌫</button>
+      <button class="tb-btn" id="colorToggle" title="اللون"><span id="colorPreview" style="width:16px;height:16px;border-radius:50%;background:#2b2622;display:block;"></span></button>
+      <button class="tb-btn" id="sizeToggle" title="الحجم والشفافية">◐</button>
       <div class="tb-sep"></div>
-      <button class="tb-btn" id="undoBtn" title="Undo (Ctrl+Z)">↺</button>
-      <button class="tb-btn" id="redoBtn" title="Redo (Ctrl+Shift+Z)">↻</button>
+      <button class="tb-btn" id="undoBtn" title="تراجع (Ctrl+Z)">↺</button>
+      <button class="tb-btn" id="redoBtn" title="إعادة (Ctrl+Shift+Z)">↻</button>
       <div class="tb-sep"></div>
       <button class="tb-btn" id="zoomOutBtn" title="Zoom out">−</button>
       <button class="tb-btn" id="zoomResetBtn" title="Reset zoom">⊙</button>
@@ -313,6 +323,13 @@
     </div>
   </div>
 
+  <div id="pageNameModal" class="page-name-modal">
+    <div class="page-name-box">
+      <h3>صفحة رسم جديدة</h3><p>اكتب اسماً واضحاً حتى تجدها أنت وصديقك بسهولة.</p>
+      <input id="pageNameInput" maxlength="60" placeholder="مثلاً: رسمة اليوم">
+      <div class="page-name-actions"><button class="cancel" id="pageNameCancel">إلغاء</button><button class="ok" id="pageNameOk">إنشاء الصفحة</button></div>
+    </div>
+  </div>
   <div id="toast" class="toast"></div>
 </div>
 
@@ -465,6 +482,7 @@ function ensureUserProfile(){
 
 function afterAuthReady(){
   $('loading').style.display='none';
+  db.ref('.info/connected').on('value', snap=>{ isOnline=snap.val()===true; if(isOnline)setOfflineBadge(false); });
   routeFromURL();
   window.addEventListener('hashchange', routeFromURL);
 }
@@ -517,7 +535,7 @@ function renderLibraryCards(ids, sharedData){
     results.forEach(({id,meta})=>{
       if(!meta) return;
       const card = document.createElement('div');
-      card.className='paper-card';
+      card.className='paper-card'; card.dataset.paperId=id;
       const cached = Local.getPaper(id);
       const thumb = meta.thumb || (cached && cached.thumb) ? `<img src="${meta.thumb || cached.thumb}">` : `<div class="ph">✎</div>`;
       card.innerHTML = `
@@ -545,39 +563,32 @@ function escapeHtml(s){
 
 $('createBtnTop').addEventListener('click', createNewPaper);
 $('createBtnEmpty').addEventListener('click', createNewPaper);
+$('pageNameOk').addEventListener('click', confirmCreatePaper);
+$('pageNameCancel').addEventListener('click', closePageNameModal);
+$('pageNameInput').addEventListener('keydown', e=>{if(e.key==='Enter')confirmCreatePaper();if(e.key==='Escape')closePageNameModal();});
 
+let pendingPaperName = null;
 function createNewPaper(){
-  const name = (window.prompt('اكتب اسم الصفحة الجديدة', 'ورقة جديدة') || '').trim();
-  if(!name) return;
-  const id = uid8();
-  const created = nowTs();
-  const meta = {
-    ownerId: currentUser.uid, name, createdAt: created, updatedAt: created,
-    members: { [currentUser.uid]: true }
-  };
-  db.ref(`papers/${id}/meta`).set(meta)
-    .then(()=> db.ref(`users/${currentUser.uid}/papers/${id}`).set(true))
-    .then(()=>{
-      Local.setPaper(id, {meta, thumb:null});
-      const idx = Local.getPapersIndex(); idx[id]=true; Local.setPapersIndex(idx);
-      const isFirstPaper = Object.keys(Local.getPapersIndex()).length <= 1 && !Local.hasSeenPrank();
-      navigateToPaper(id, isFirstPaper);
-    })
-    .catch(()=>{
-      // offline creation — keep entirely local, sync later
-      Local.setPaper(id, {meta, thumb:null});
-      const idx = Local.getPapersIndex(); idx[id]=true; Local.setPapersIndex(idx);
-      Local.queuePush(id, {type:'create_meta', meta});
-      navigateToPaper(id, !Local.hasSeenPrank());
-    });
+  const modal=$('pageNameModal'), input=$('pageNameInput'); modal.classList.add('active'); input.value=''; setTimeout(()=>input.focus(),30);
+}
+function closePageNameModal(){ $('pageNameModal').classList.remove('active'); }
+function confirmCreatePaper(){
+  const name=$('pageNameInput').value.trim(); if(!name){toast('اكتب اسم الصفحة أولاً');return;}
+  closePageNameModal(); const id=uid8(), created=nowTs();
+  const meta={ownerId:currentUser.uid,name,createdAt:created,updatedAt:created,members:{[currentUser.uid]:true}};
+  // Keep the local index immediately, then persist both records together.
+  const idx=Local.getPapersIndex();idx[id]=true;Local.setPapersIndex(idx);Local.setPaper(id,{meta,thumb:null});
+  db.ref(`papers/${id}/meta`).set(meta).then(()=>db.ref(`users/${currentUser.uid}/papers/${id}`).set(true)).then(()=>{
+    toast('تم حفظ الصفحة'); navigateToPaper(id,!Local.hasSeenPrank());
+  }).catch(err=>{ console.error(err); Local.queuePush(id,{type:'create_meta',meta}); if(!navigator.onLine)setOfflineBadge(true); navigateToPaper(id,!Local.hasSeenPrank()); });
 }
 
 function deletePaper(id, meta){
   if(!window.confirm(`حذف الصفحة «${meta?.name || 'ورقة'}» نهائياً؟`)) return;
-  db.ref(`papers/${id}`).remove().then(()=>{
-    localStorage.removeItem(LS_PREFIX+'paper_'+id); localStorage.removeItem(LS_PREFIX+'strokes_'+id);
-    const idx=Local.getPapersIndex(); delete idx[id]; Local.setPapersIndex(idx); toast('تم حذف الصفحة');
-  }).catch(()=>toast('تعذر حذف الصفحة — تحقق من الاتصال'));
+  const card=document.querySelector(`.paper-card[data-paper-id=\"${id}\"]`); if(card)card.remove();
+  const idx=Local.getPapersIndex(); delete idx[id]; Local.setPapersIndex(idx);
+  db.ref(`papers/${id}`).remove().then(()=>{ localStorage.removeItem(LS_PREFIX+'paper_'+id); localStorage.removeItem(LS_PREFIX+'strokes_'+id); toast('تم حذف الصفحة'); })
+    .catch(err=>{ toast('فشل الحذف: '+(err.code||'تحقق من Rules'),4000); loadLibrary(); });
 }
 
 function navigateToPaper(id, showPrank){
@@ -615,8 +626,8 @@ function maybeShowPrank(id, force){
   });
   $('prankFree').addEventListener('click', ()=>{
     Local.setSeenPrank();
-    ov.querySelector('.modal').innerHTML = `<div class="prank-msg">نتمسخر حبي 😭<br>عندك كامل الوقتتت ❤️</div>`;
-    setTimeout(()=>{ ov.remove(); startCanvas(id); }, 1400);
+    ov.remove();
+    startCanvas(id);
   });
 }
 
@@ -832,6 +843,11 @@ let view = { x:0, y:0, scale:1 };
 let currentStrokeId = null, currentPoints = [], drawing = false;
 let lastActiveSend = 0, panMode = false, lastPan = null, spaceDown = false;
 let pointers = new Map(), pinchState = null;
+let liveFrame = 0;
+function scheduleLiveRender(){
+  if(liveFrame)return;
+  liveFrame=requestAnimationFrame(()=>{liveFrame=0;renderLivePreviews({});});
+}
 
 function initCanvasIfNeeded(){
   if(dCanvas) return;
@@ -863,7 +879,14 @@ function redrawAll(){
 function drawStroke(s){redrawAll();}
 function renderLivePreviews(activeMap){
   if(!lCtx)return; lCtx.setTransform(1,0,0,1,0,0);lCtx.clearRect(0,0,lCanvas.width,lCanvas.height);applyTransform(lCtx);
-  Object.values(strokes).sort((a,b)=>(a.createdAt||0)-(b.createdAt||0)).forEach(s=>paintStroke(lCtx,s));
+  // Keep the live layer for in-progress strokes only. Painting the finished
+  // artwork here as well caused transparent strokes to be composited twice,
+  // making intersections darker and making erased pixels reappear on release.
+  if(drawing&&tool.brush==='eraser'&&currentPoints.length){
+    redrawAll(); applyTransform(dCtx);
+    paintStroke(dCtx,{brush:'eraser',size:tool.size,color:'#000',opacity:100,points:currentPoints});
+    return;
+  }
   Object.keys(activeMap||{}).forEach(uid=>{if(uid!==currentUser.uid&&activeMap[uid]?.points?.length)paintStroke(lCtx,activeMap[uid]);});
   if(drawing&&currentPoints.length)paintStroke(lCtx,{brush:tool.brush,color:tool.color,size:tool.size,opacity:tool.opacity,points:currentPoints,seed:0});
 }
@@ -889,7 +912,7 @@ function onPointerMove(e){
   }
   const world=screenToWorld(e.clientX,e.clientY);sendCursor(world.x,world.y);
   if(panMode&&lastPan){view.x+=e.clientX-lastPan.x;view.y+=e.clientY-lastPan.y;lastPan={x:e.clientX,y:e.clientY};redrawAll();renderLivePreviews({});return;}
-  if(!drawing)return;addPoint(e);throttledBroadcastActive();renderLivePreviews({});
+  if(!drawing)return;addPoint(e);throttledBroadcastActive();scheduleLiveRender();
 }
 function onPointerUp(e){
   e.preventDefault();pointers.delete(e.pointerId);
@@ -910,7 +933,7 @@ function finalizeStroke(){
   if(!currentPoints.length){currentPoints=[];return;}
   const stroke={userId:currentUser.uid,brush:tool.brush,color:tool.color,size:tool.size,opacity:tool.opacity,points:currentPoints,createdAt:nowTs(),seed:Math.floor(Math.random()*100000)};
   const sid=currentStrokeId;strokes[sid]=stroke;undoStack.push(sid);redoStack=[];persistStrokesLocal();redrawAll();currentPoints=[];currentStrokeId=null;
-  if(currentPaperId)db.ref(`papers/${currentPaperId}/strokes/${sid}`).set(stroke).then(()=>db.ref(`papers/${currentPaperId}/activeStrokes/${currentUser.uid}`).remove()).then(()=>db.ref(`papers/${currentPaperId}/meta/updatedAt`).set(nowTs())).catch(()=>{Local.queuePush(currentPaperId,{type:'add_stroke',id:sid,stroke});setOfflineBadge(true);});
+  if(currentPaperId)db.ref(`papers/${currentPaperId}/strokes/${sid}`).set(stroke).then(()=>db.ref(`papers/${currentPaperId}/activeStrokes/${currentUser.uid}`).remove()).then(()=>db.ref(`papers/${currentPaperId}/meta/updatedAt`).set(nowTs())).catch(()=>{Local.queuePush(currentPaperId,{type:'add_stroke',id:sid,stroke});if(!navigator.onLine)setOfflineBadge(true);});
   scheduleThumbUpdate();
 }
 function undo(){const sid=undoStack.pop();if(!sid)return;const s=strokes[sid];redoStack.push({id:sid,stroke:s});delete strokes[sid];persistStrokesLocal();redrawAll();renderLivePreviews({});if(currentPaperId)db.ref(`papers/${currentPaperId}/strokes/${sid}`).remove().catch(()=>Local.queuePush(currentPaperId,{type:'remove_stroke',id:sid}));}
@@ -952,6 +975,7 @@ function buildBrushGrid(){
 }
 function selectBrush(id){
   tool.brush = id;
+  $('eraserQuick')?.classList.toggle('tool-active', id==='eraser');
   document.querySelectorAll('.brush-opt').forEach(e=> e.classList.toggle('active', e.dataset.id===id));
 }
 function buildColorGrid(){
@@ -980,6 +1004,7 @@ function setColor(c){
 
 function bindToolbar(){
   $('brushToggle').addEventListener('click', ()=> togglePanel('brushPanel'));
+  $('eraserQuick').addEventListener('click', ()=>{selectBrush('eraser'); $('eraserQuick').classList.add('tool-active'); toast('الممحاة مفعلة — تمسح أثناء السحب');});
   $('colorToggle').addEventListener('click', ()=> togglePanel('colorPanel'));
   $('sizeToggle').addEventListener('click', ()=> togglePanel('sizePanel'));
   $('undoBtn').addEventListener('click', undo);
