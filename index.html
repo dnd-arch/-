@@ -240,9 +240,7 @@
   .auth-fields input{width:100%;padding:12px 14px;border-radius:12px;border:1px solid var(--line);font-family:Cairo;font-size:13px;text-align:right;background:var(--paper);}
   .password-wrap{position:relative;}
   .password-wrap input{padding-left:44px;}
-  .password-toggle{position:absolute!important;left:8px!important;top:50%!important;transform:translateY(-50%)!important;width:auto!important;height:auto!important;margin:0!important;padding:4px!important;border:0!important;border-radius:8px!important;background:transparent!important;color:var(--muted)!important;cursor:pointer;font-size:17px!important;line-height:1!important;z-index:2;}
-.name-card .password-wrap{position:relative;width:100%;}
-.name-card .password-wrap input{padding-left:44px!important;padding-right:14px!important;display:block;width:100%;}
+  .password-toggle{position:absolute;left:8px;top:50%;transform:translateY(-50%);border:0;background:transparent;color:var(--muted);cursor:pointer;font-size:17px;padding:4px;}
   .password-toggle:hover{color:var(--accent);}
   .auth-actions{display:grid;grid-template-columns:1fr 1fr;gap:8px;}
   .auth-actions button{font-size:13px;padding:12px;}
@@ -253,10 +251,6 @@
     background:#3a3128; color:#fff; font-size:11.5px; padding:6px 14px; border-radius:999px; display:none;
   }
   .offline-badge.show{display:block;}
-
-/* SINGLE SHARED ROOM: page library and page-creation UI are intentionally hidden. */
-#library,#libEmpty,#pageNameModal{display:none!important;}
-
 </style>
 </head>
 <body>
@@ -281,7 +275,7 @@
         <button id="nameSubmit">دخول</button>
         <button id="registerSubmit" class="secondary">إنشاء حساب</button>
       </div>
-      <div class="auth-note">حسابك الثابت يحفظ دخولك، وندخل كلنا نفس مساحة الرسم المشتركة ❤️</div>
+      <div class="auth-note">حسابك الثابت يحفظ اسمك وصفحاتك على كل جهاز.</div>
     </div>
   </div>
 
@@ -458,14 +452,6 @@ let listenersAttached = false;
 let firebaseRefs = {};
 let isOnline = navigator.onLine;
 
-/* ---------------- Single shared drawing room ----------------
-   There is ONE drawing page for everyone. All authenticated users
-   enter the same Firebase room and draw on the same canvas.
-*/
-const SHARED_PAPER_ID = 'shared-room';
-const SHARED_PAPER_NAME = 'نرسم مع بعض ❤️';
-
-
 const tool = {
   brush: 'pencil',
   previousBrush: 'pencil',
@@ -573,50 +559,25 @@ function afterAuthReady(){
   $('loading').style.display='none';
   db.ref('.info/connected').on('value', snap=>{ isOnline=snap.val()===true; if(isOnline)setOfflineBadge(false); });
   routeFromURL();
+  window.addEventListener('hashchange', routeFromURL);
 }
 
 function routeFromURL(){
-  // ONE shared room for everyone. Start the canvas immediately so a slow
-  // Firebase request can never leave the app waiting on a blank/loading view.
-  history.replaceState(null, '', location.pathname + location.search);
-  startCanvas(SHARED_PAPER_ID);
-  ensureSharedPaper().catch(err=>console.warn('Shared room setup:', err));
+  // Hash-based routing (#paper/xxxx) — works whether the file is opened
+  // directly (file://), from a plain static host, or a real domain,
+  // with no server-side path rewriting required.
+  const m = location.hash.match(/#paper\/([a-zA-Z0-9_-]+)/);
+  if(m){ openPaper(m[1]); }
+  else { showLibrary(); }
 }
 
 /* =========================================================
    LIBRARY
 ========================================================= */
 function showLibrary(){
-  // There is no separate page library anymore. Returning here simply opens
-  // the one shared room, without waiting for Firebase first.
-  startCanvas(SHARED_PAPER_ID);
-  ensureSharedPaper().catch(err=>console.warn('Shared room setup:', err));
-}
-
-function ensureSharedPaper(){
-  const ref = db.ref(`papers/${SHARED_PAPER_ID}/meta`);
-  return ref.once('value').then(snap=>{
-    const existing = snap.val();
-    if(existing) return existing;
-    const created = nowTs();
-    const meta = {
-      ownerId: currentUser.uid,
-      name: SHARED_PAPER_NAME,
-      createdAt: created,
-      updatedAt: created,
-      members: { [currentUser.uid]: true }
-    };
-    return ref.set(meta).then(()=>meta);
-  }).catch(err=>{
-    console.error('ensureSharedPaper:', err);
-    return (Local.getPaper(SHARED_PAPER_ID)||{}).meta || {
-      ownerId: currentUser.uid,
-      name: SHARED_PAPER_NAME,
-      createdAt: nowTs(),
-      updatedAt: nowTs(),
-      members: { [currentUser.uid]: true }
-    };
-  });
+  closeCanvasView();
+  $('library').classList.add('active');
+  loadLibrary();
 }
 
 function loadLibrary(){
@@ -705,22 +666,21 @@ function openPrankInfo(){
 
 let pendingPaperName = null;
 function createNewPaper(){
-  // Page creation is disabled: everyone uses the same shared room.
-  navigateToPaper(SHARED_PAPER_ID, false);
-  ensureSharedPaper().catch(err=>console.warn('Shared room setup:', err));
+  const modal=$('pageNameModal'), input=$('pageNameInput'); modal.classList.add('active'); input.value=''; setTimeout(()=>input.focus(),30);
 }
 function closePageNameModal(){ $('pageNameModal').classList.remove('active'); }
 function confirmCreatePaper(){
-  closePageNameModal();
-  navigateToPaper(SHARED_PAPER_ID, false);
-  ensureSharedPaper().catch(err=>console.warn('Shared room setup:', err));
+  const name=$('pageNameInput').value.trim(); if(!name){toast('اكتب اسم الصفحة أولاً');return;}
+  closePageNameModal(); const id=uid8(), created=nowTs();
+  const meta={ownerId:currentUser.uid,name,createdAt:created,updatedAt:created,members:{[currentUser.uid]:true}};
+  // Keep the local index immediately, then persist both records together.
+  const idx=Local.getPapersIndex();idx[id]=true;Local.setPapersIndex(idx);Local.setPaper(id,{meta,thumb:null});
+  db.ref(`papers/${id}/meta`).set(meta).then(()=>db.ref(`users/${currentUser.uid}/papers/${id}`).set(true)).then(()=>{
+    toast('تم حفظ الصفحة'); navigateToPaper(id,!Local.hasSeenPrank());
+  }).catch(err=>{ console.error(err); Local.queuePush(id,{type:'create_meta',meta}); if(!navigator.onLine)setOfflineBadge(true); navigateToPaper(id,!Local.hasSeenPrank()); });
 }
 
 function deletePaper(id, meta){
-  if(id===SHARED_PAPER_ID){
-    toast('هذه مساحة الرسم المشتركة ولا يمكن حذفها');
-    return;
-  }
   if(!window.confirm(`حذف الصفحة «${meta?.name || 'ورقة'}» نهائياً؟`)) return;
   const card=document.querySelector(`.paper-card[data-paper-id=\"${id}\"]`); if(card)card.remove();
   const idx=Local.getPapersIndex(); delete idx[id]; Local.setPapersIndex(idx);
@@ -729,9 +689,10 @@ function deletePaper(id, meta){
 }
 
 function navigateToPaper(id, showPrank){
-  const sharedId = SHARED_PAPER_ID;
-  history.replaceState(null, '', location.pathname + location.search);
-  openPaper(sharedId, showPrank);
+  // setting location.hash doesn't fire 'hashchange' from our own script in
+  // every browser reliably before we call openPaper, so call it directly too.
+  history.replaceState(null, '', `#paper/${id}`);
+  openPaper(id, showPrank);
 }
 
 /* =========================================================
@@ -771,11 +732,10 @@ function maybeShowPrank(id, force){
    OPEN / EXIT PAPER
 ========================================================= */
 function openPaper(id, showPrankIfFirst){
-  // Ignore any requested page id. There is only one shared canvas.
-  currentPaperId = SHARED_PAPER_ID;
+  currentPaperId = id;
   $('library').classList.remove('active');
   $('libEmpty').style.display='none';
-  maybeShowPrank(SHARED_PAPER_ID, showPrankIfFirst === true);
+  maybeShowPrank(id, showPrankIfFirst === true);
 }
 
 function startCanvas(id){
@@ -808,10 +768,9 @@ function loadStrokesFromCache(id){
 }
 
 $('exitBtn').addEventListener('click', ()=>{
-  // There are no separate pages to return to. Just leave the canvas view
-  // without starting another Firebase request. The next authenticated route
-  // will reopen the same shared room.
+  history.replaceState(null, '', location.pathname + location.search);
   closeCanvasView();
+  showLibrary();
 });
 
 function closeCanvasView(){
