@@ -238,6 +238,10 @@
   }
   .auth-fields{display:grid;gap:9px;margin-bottom:12px;}
   .auth-fields input{width:100%;padding:12px 14px;border-radius:12px;border:1px solid var(--line);font-family:Cairo;font-size:13px;text-align:right;background:var(--paper);}
+  .password-wrap{position:relative;}
+  .password-wrap input{padding-left:44px;}
+  .password-toggle{position:absolute;left:8px;top:50%;transform:translateY(-50%);border:0;background:transparent;color:var(--muted);cursor:pointer;font-size:17px;padding:4px;}
+  .password-toggle:hover{color:var(--accent);}
   .auth-actions{display:grid;grid-template-columns:1fr 1fr;gap:8px;}
   .auth-actions button{font-size:13px;padding:12px;}
   .auth-actions .secondary{background:var(--accent-soft);color:var(--accent);}
@@ -264,7 +268,7 @@
       <input id="nameInput" type="text" maxlength="18" placeholder="اسمك">
       <div class="auth-fields">
         <input id="emailInput" type="email" autocomplete="email" placeholder="الإيميل">
-        <input id="passwordInput" type="password" autocomplete="new-password" placeholder="كلمة المرور (6 أحرف على الأقل)">
+        <div class="password-wrap"><input id="passwordInput" type="password" autocomplete="new-password" placeholder="كلمة المرور (6 أحرف على الأقل)"><button type="button" class="password-toggle" id="passwordToggle" aria-label="إظهار كلمة المرور">◉</button></div>
       </div>
       <div class="auth-actions">
         <button id="nameSubmit">دخول</button>
@@ -483,6 +487,11 @@ function boot(){
 
 $('nameSubmit').addEventListener('click', submitName);
 $('registerSubmit').addEventListener('click', ()=>authenticateEmail('register'));
+$('passwordToggle').addEventListener('click', ()=>{
+  const input=$('passwordInput'), button=$('passwordToggle');
+  const visible=input.type==='text'; input.type=visible?'password':'text';
+  button.textContent=visible?'◉':'◌'; button.setAttribute('aria-label',visible?'إظهار كلمة المرور':'إخفاء كلمة المرور');
+});
 $('nameInput').addEventListener('keydown', e=>{ if(e.key==='Enter') submitName(); });
 function submitName(){
   const v = $('nameInput').value.trim();
