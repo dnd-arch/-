@@ -576,19 +576,21 @@ function afterAuthReady(){
 }
 
 function routeFromURL(){
-  // The site intentionally has ONE shared drawing room.
-  // Old #paper/... links are ignored so nobody gets a private page.
+  // ONE shared room for everyone. Start the canvas immediately so a slow
+  // Firebase request can never leave the app waiting on a blank/loading view.
   history.replaceState(null, '', location.pathname + location.search);
-  ensureSharedPaper().then(()=>startCanvas(SHARED_PAPER_ID));
+  startCanvas(SHARED_PAPER_ID);
+  ensureSharedPaper().catch(err=>console.warn('Shared room setup:', err));
 }
 
 /* =========================================================
    LIBRARY
 ========================================================= */
 function showLibrary(){
-  // Kept for compatibility with older buttons/links: there is no page library anymore.
-  closeCanvasView();
-  ensureSharedPaper().then(()=>startCanvas(SHARED_PAPER_ID));
+  // There is no separate page library anymore. Returning here simply opens
+  // the one shared room, without waiting for Firebase first.
+  startCanvas(SHARED_PAPER_ID);
+  ensureSharedPaper().catch(err=>console.warn('Shared room setup:', err));
 }
 
 function ensureSharedPaper(){
@@ -704,12 +706,14 @@ function openPrankInfo(){
 let pendingPaperName = null;
 function createNewPaper(){
   // Page creation is disabled: everyone uses the same shared room.
-  ensureSharedPaper().then(()=>navigateToPaper(SHARED_PAPER_ID, false));
+  navigateToPaper(SHARED_PAPER_ID, false);
+  ensureSharedPaper().catch(err=>console.warn('Shared room setup:', err));
 }
 function closePageNameModal(){ $('pageNameModal').classList.remove('active'); }
 function confirmCreatePaper(){
   closePageNameModal();
-  ensureSharedPaper().then(()=>navigateToPaper(SHARED_PAPER_ID, false));
+  navigateToPaper(SHARED_PAPER_ID, false);
+  ensureSharedPaper().catch(err=>console.warn('Shared room setup:', err));
 }
 
 function deletePaper(id, meta){
@@ -804,9 +808,10 @@ function loadStrokesFromCache(id){
 }
 
 $('exitBtn').addEventListener('click', ()=>{
-  // No separate pages/library: keep the user in the single shared room.
-  history.replaceState(null, '', location.pathname + location.search);
-  ensureSharedPaper().then(()=>startCanvas(SHARED_PAPER_ID));
+  // There are no separate pages to return to. Just leave the canvas view
+  // without starting another Firebase request. The next authenticated route
+  // will reopen the same shared room.
+  closeCanvasView();
 });
 
 function closeCanvasView(){
