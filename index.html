@@ -236,6 +236,12 @@
     width:100%; padding:14px; border:none; border-radius:14px; background:var(--ink); color:#fff;
     font-family:'Cairo'; font-size:14.5px; cursor:pointer;
   }
+  .auth-fields{display:grid;gap:9px;margin-bottom:12px;}
+  .auth-fields input{width:100%;padding:12px 14px;border-radius:12px;border:1px solid var(--line);font-family:Cairo;font-size:13px;text-align:right;background:var(--paper);}
+  .auth-actions{display:grid;grid-template-columns:1fr 1fr;gap:8px;}
+  .auth-actions button{font-size:13px;padding:12px;}
+  .auth-actions .secondary{background:var(--accent-soft);color:var(--accent);}
+  .auth-note{font-size:11px;color:var(--muted);line-height:1.7;margin-top:10px;}
   .offline-badge{
     position:absolute; top:60px; left:50%; transform:translateX(-50%); z-index:30;
     background:#3a3128; color:#fff; font-size:11.5px; padding:6px 14px; border-radius:999px; display:none;
@@ -256,7 +262,15 @@
       <span class="mark">أهلاً 👋</span>
       <p>وش نسميك في الرسمة؟</p>
       <input id="nameInput" type="text" maxlength="18" placeholder="اسمك">
-      <button id="nameSubmit">يلا نبدا</button>
+      <div class="auth-fields">
+        <input id="emailInput" type="email" autocomplete="email" placeholder="الإيميل">
+        <input id="passwordInput" type="password" autocomplete="new-password" placeholder="كلمة المرور (6 أحرف على الأقل)">
+      </div>
+      <div class="auth-actions">
+        <button id="nameSubmit">دخول</button>
+        <button id="registerSubmit" class="secondary">إنشاء حساب</button>
+      </div>
+      <div class="auth-note">حسابك الثابت يحفظ اسمك وصفحاتك على كل جهاز.</div>
     </div>
   </div>
 
@@ -266,7 +280,11 @@
         <div class="lib-title">نرسم مع بعض حبي</div>
         <div class="lib-sub" id="libSub"></div>
       </div>
-      <button class="create-btn" id="createBtnTop"><span class="plus">＋</span> ورقة جديدة</button>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;justify-content:flex-end;">
+        <button class="create-btn" id="renameBtn">تغيير الاسم</button>
+        <button class="create-btn" id="prankBtn">Premium</button>
+        <button class="create-btn" id="createBtnTop"><span class="plus">＋</span> ورقة جديدة</button>
+      </div>
     </div>
     <div class="lib-grid" id="libGrid"></div>
   </div>
@@ -444,13 +462,14 @@ function boot(){
     if(user){
       currentUser = user;
       const savedName = Local.getName();
-      if(savedName){
+      if(savedName && !user.isAnonymous){
         userProfile.name = savedName;
         userProfile.color = colorForUid(user.uid);
         ensureUserProfile();
         afterAuthReady();
       } else {
         $('loading').style.display='none';
+        $('nameInput').value=savedName || '';
         $('namePrompt').style.display='flex';
       }
     } else {
@@ -463,16 +482,43 @@ function boot(){
 }
 
 $('nameSubmit').addEventListener('click', submitName);
+$('registerSubmit').addEventListener('click', ()=>authenticateEmail('register'));
 $('nameInput').addEventListener('keydown', e=>{ if(e.key==='Enter') submitName(); });
 function submitName(){
   const v = $('nameInput').value.trim();
   if(!v) return;
-  Local.setName(v);
-  userProfile.name = v;
-  userProfile.color = colorForUid(currentUser.uid);
-  ensureUserProfile();
-  $('namePrompt').style.display='none';
-  afterAuthReady();
+  authenticateEmail('login');
+}
+function authMessage(text){
+  const n=document.querySelector('.auth-note'); if(n)n.textContent=text;
+}
+function authenticateEmail(mode){
+  const name=$('nameInput').value.trim(), email=$('emailInput').value.trim(), password=$('passwordInput').value;
+  if(!name){authMessage('اكتب اسمك أولاً');return;}
+  if(!email||!email.includes('@')){authMessage('اكتب إيميل صحيح');return;}
+  if(password.length<6){authMessage('كلمة المرور يجب أن تكون 6 أحرف على الأقل');return;}
+  authMessage(mode==='register'?'جاري إنشاء الحساب…':'جاري تسجيل الدخول…');
+  let task;
+  // Email accounts are intentionally independent from the old anonymous
+  // session: no linkWithCredential, no migration, and no mixed identities.
+  if(mode==='register'){
+    task=auth.createUserWithEmailAndPassword(email,password);
+  } else {
+    task=auth.signInWithEmailAndPassword(email,password);
+  }
+  task.then(result=>{
+    if(currentUser && currentUser.isAnonymous){
+      // Do not mix the old anonymous library with the new email account.
+      localStorage.removeItem(LS_PREFIX+'papers');
+    }
+    currentUser=result.user;
+    Local.setName(name); userProfile={name,color:colorForUid(currentUser.uid)}; ensureUserProfile();
+    $('namePrompt').style.display='none'; afterAuthReady();
+  }).catch(err=>{
+    console.error(err);
+    const messages={'auth/email-already-in-use':'الإيميل مستخدم من قبل — اختر دخول','auth/invalid-credential':'الإيميل أو كلمة المرور غير صحيحة','auth/weak-password':'كلمة المرور ضعيفة','auth/invalid-email':'الإيميل غير صحيح'};
+    authMessage(messages[err.code] || 'تعذر تسجيل الدخول، تحقق من Firebase Authentication');
+  });
 }
 function ensureUserProfile(){
   db.ref(`users/${currentUser.uid}/profile`).set({
@@ -513,8 +559,14 @@ function loadLibrary(){
     const all = snap.val() || {};
     const idx = {};
     const ids = Object.keys(all).filter(id=> all[id] && all[id].meta).map(id=>{ idx[id]=true; return id; });
-    Local.setPapersIndex(idx);
-    if(ids.length===0){ $('libGrid').innerHTML=''; $('library').classList.remove('active'); $('libEmpty').style.display='flex'; return; }
+    // Do not overwrite a healthy local index with an empty/partial Firebase
+    // response while the connection is still settling.
+    if(ids.length) Local.setPapersIndex(idx);
+    if(ids.length===0){
+      const localIds=Object.keys(Local.getPapersIndex());
+      if(localIds.length){ $('libEmpty').style.display='none'; $('library').classList.add('active'); renderLibraryCards(localIds); return; }
+      $('libGrid').innerHTML=''; $('library').classList.remove('active'); $('libEmpty').style.display='flex'; return;
+    }
     $('libEmpty').style.display='none'; $('library').classList.add('active');
     renderLibraryCards(ids, all);
   }, ()=>{
@@ -527,7 +579,9 @@ function renderLibraryCards(ids, sharedData){
   const grid = $('libGrid');
   grid.innerHTML='';
   const metaPromises = ids.map(id=>
-    (sharedData && sharedData[id] && sharedData[id].meta ? Promise.resolve({id, meta:sharedData[id].meta}) : db.ref(`papers/${id}/meta`).once('value').then(s=>({id, meta:s.val()})))
+    ((sharedData && sharedData[id] && sharedData[id].meta) || (Local.getPaper(id)||{}).meta
+      ? Promise.resolve({id, meta:(sharedData && sharedData[id] && sharedData[id].meta) || (Local.getPaper(id)||{}).meta})
+      : db.ref(`papers/${id}/meta`).once('value').then(s=>({id, meta:s.val()})))
       .catch(()=>({id, meta: (Local.getPaper(id)||{}).meta}))
   );
   Promise.all(metaPromises).then(results=>{
@@ -563,9 +617,24 @@ function escapeHtml(s){
 
 $('createBtnTop').addEventListener('click', createNewPaper);
 $('createBtnEmpty').addEventListener('click', createNewPaper);
+$('renameBtn').addEventListener('click', openNameEditor);
+$('prankBtn').addEventListener('click', openPrankInfo);
 $('pageNameOk').addEventListener('click', confirmCreatePaper);
 $('pageNameCancel').addEventListener('click', closePageNameModal);
 $('pageNameInput').addEventListener('keydown', e=>{if(e.key==='Enter')confirmCreatePaper();if(e.key==='Escape')closePageNameModal();});
+
+function openNameEditor(){
+  $('nameInput').value=Local.getName();
+  $('namePrompt').style.display='flex';
+  setTimeout(()=>$('nameInput').focus(),30);
+}
+function openPrankInfo(){
+  const ov=document.createElement('div'); ov.className='overlay';
+  ov.innerHTML=`<div class="modal"><h2>Premium Drawing</h2><div class="price">$1,000<span style="font-size:16px">/mo</span></div><div class="price-sub">كل أدوات الرسم الاحترافية موجودة عندك مجاناً</div><ul><li>فرش متعددة للرسم</li><li>ألوان وحجم وشفافية</li><li>تعاون مباشر مع صديقك</li><li>حفظ وتصدير بدون علامة مائية</li></ul><button class="btn-sub" id="demoPremium">تجربة الزر</button><button class="btn-free" id="closePremium">إغلاق</button></div>`;
+  document.body.appendChild(ov);
+  ov.querySelector('#demoPremium').addEventListener('click',e=>{e.currentTarget.classList.remove('prank-shake');void e.currentTarget.offsetWidth;e.currentTarget.classList.add('prank-shake');});
+  ov.querySelector('#closePremium').addEventListener('click',()=>ov.remove());
+}
 
 let pendingPaperName = null;
 function createNewPaper(){
